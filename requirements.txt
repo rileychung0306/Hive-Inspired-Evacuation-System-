@@ -1,0 +1,14 @@
+pygame
+numpy
+pandas
+networkx
+osmnx
+folium
+streamlit
+streamlit-folium
+matplotlib
+requests
+openai
+python-dotenv
+reportlab
+qrcode[pil]
