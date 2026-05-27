@@ -29,11 +29,17 @@ CELL_COLORS = {
 NUM_DRONES = 10            # 드론 대수
 DRONE_VISION_RADIUS = 10   # 드론 시야 반경 (칸 단위)
 DRONE_BATTERY_DRAIN = 1.0  # 1 스텝(=1분)당 배터리 1% 감소
+DRONE_SPEED = 2.0          # 1 스텝당 이동 칸 수
+DRONE_RECRUIT_PROB = 0.6   # 다른 드론이 위험을 발견한 곳으로 모이는 확률 (꿀벌 waggle dance)
+DETECT_THRESHOLD = 0.15    # 이 값보다 큰 위험만 드론이 '본다'
+DETECT_PROB = 0.7          # 위험을 실제로 탐지할 확률 (드론은 완벽하지 않음)
+FALSE_DETECT_PROB = 0.03   # 시야 안에서 가끔 잘못 보고(오탐)할 확률
 
 # --- Bee voting (꿀벌 투표) 설정 --- (Phase 2에서 사용)
 DRONE_CONFIDENCE = 0.1     # 드론 1대가 위험을 보고할 때의 신뢰도
 NEWS_CONFIDENCE = 0.3      # 뉴스(LLM)가 보고할 때의 신뢰도 (뉴스를 더 신뢰함)
 QUORUM_THRESHOLD = 0.5     # 합산 신뢰도가 이 값을 넘어야 '확인된 위험'으로 인정
+CONFIDENCE_DECAY = 0.03    # 신뢰도가 매 스텝 줄어드는 비율 (오래된 정보는 잊혀짐)
 
 # --- 시뮬레이션 ---
 TIME_SCALE = 10            # 시간 가속 배율 (실제보다 10배 빠르게)

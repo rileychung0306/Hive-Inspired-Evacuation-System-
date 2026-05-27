@@ -75,7 +75,7 @@ class HazardField:
             if not spec.static:
                 src = self.sources[:, :, k]
                 pulse = float(self.rng.uniform(0.5, 1.0))
-                reignite = (src > 0.2) & (self.rng.random(layer.shape) < 0.5)
+                reignite = (src > 0.2) & (self.rng.random(layer.shape) < 0.4)
                 layer = np.where(reignite, np.maximum(layer, src * pulse), layer)
 
             self.field[:, :, k] = np.clip(layer, 0.0, 1.0)

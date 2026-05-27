@@ -56,13 +56,27 @@ def save_snapshot(city_grid, field, hazard_module, path, title=None):
     return path
 
 
-def run_pygame(city_grid, field_obj, hazard_module, steps_per_frame=1, max_steps=None):
-    """실시간 창으로 시뮬레이션 보기. ESC 또는 창 닫기로 종료."""
+def _draw_drones_pygame(screen, drones):
+    """드론을 파란 점 + 반투명 시야 원으로 그립니다."""
+    import pygame
+    px = settings.CELL_PIXELS
+    for d in drones:
+        x, y = int(d.pos[1] * px), int(d.pos[0] * px)
+        pygame.draw.circle(screen, (60, 130, 255), (x, y), int(d.vision * px), 1)
+        pygame.draw.circle(screen, (10, 60, 230), (x, y), max(3, px), 0)
+
+
+def run_pygame(city_grid, field_obj, swarm, bee, hazard_module,
+               steps_per_frame=1, max_steps=None):
+    """실시간 창으로 시뮬레이션 보기.
+    화면에는 기본적으로 '드론 군집이 확인한 위험'(꿀벌 투표 결과)을 보여줍니다.
+    키: T = 실제 위험/확인된 위험 전환,  ESC = 종료.
+    """
     import pygame
     pygame.init()
     screen = pygame.display.set_mode((settings.WINDOW_WIDTH, settings.WINDOW_HEIGHT))
-    pygame.display.set_caption("Hive Evac — Bakhmut 위험 확산 (Phase 1)")
     clock = pygame.time.Clock()
+    show_truth = False
 
     running = True
     while running:
@@ -71,15 +85,22 @@ def run_pygame(city_grid, field_obj, hazard_module, steps_per_frame=1, max_steps
                 running = False
             elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
                 running = False
+            elif e.type == pygame.KEYDOWN and e.key == pygame.K_t:
+                show_truth = not show_truth
 
         for _ in range(steps_per_frame):
             field_obj.step()
+            swarm.step(field_obj.field, bee)
 
-        rgb = compose_rgb(city_grid, field_obj.field, hazard_module)
-        # pygame은 [x][y] 순서를 원해서 행/열을 바꿔줌
+        field_to_show = field_obj.field if show_truth else bee.confirmed_field()
+        rgb = compose_rgb(city_grid, field_to_show, hazard_module)
         surf = pygame.surfarray.make_surface(rgb.transpose(1, 0, 2))
         surf = pygame.transform.scale(surf, (settings.WINDOW_WIDTH, settings.WINDOW_HEIGHT))
         screen.blit(surf, (0, 0))
+        _draw_drones_pygame(screen, swarm.drones)
+
+        mode = "실제 위험(정답)" if show_truth else "드론이 확인한 위험"
+        pygame.display.set_caption(f"Hive Evac Phase 2 — {mode}  (T:전환, ESC:종료)  step {field_obj.step_count}")
         pygame.display.flip()
         clock.tick(settings.FPS)
 
@@ -87,3 +108,40 @@ def run_pygame(city_grid, field_obj, hazard_module, steps_per_frame=1, max_steps
             running = False
 
     pygame.quit()
+
+
+def save_snapshot_swarm(city_grid, true_field, bee, drones, hazard_module, path, title=None):
+    """두 칸 비교 그림: (왼쪽) 실제 위험  vs  (오른쪽) 드론 군집이 확인한 위험 + 드론."""
+    import matplotlib
+    matplotlib.use("Agg")
+    matplotlib.rcParams["font.family"] = "AppleGothic"
+    matplotlib.rcParams["axes.unicode_minus"] = False
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Patch, Circle
+
+    rgb_true = compose_rgb(city_grid, true_field, hazard_module)
+    rgb_conf = compose_rgb(city_grid, bee.confirmed_field(), hazard_module)
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 7))
+    axes[0].imshow(rgb_true)
+    axes[0].set_title("실제 위험 (정답)")
+    axes[1].imshow(rgb_conf)
+    axes[1].set_title("드론 군집이 확인한 위험 (꿀벌 투표)")
+    for ax in axes:
+        ax.set_xticks([]); ax.set_yticks([])
+
+    for d in drones:
+        axes[1].add_patch(Circle((d.pos[1], d.pos[0]), d.vision,
+                                 fill=False, color="#3b82f6", lw=0.6, alpha=0.6))
+        axes[1].plot(d.pos[1], d.pos[0], "o", color="#1e3aff", ms=4)
+
+    handles = [Patch(facecolor=np.array(s.color) / 255, label=s.display_name)
+               for s in hazard_module.hazards]
+    axes[1].legend(handles=handles, loc="upper right", fontsize=8, framealpha=0.9)
+    if title:
+        fig.suptitle(title)
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fig.savefig(path, dpi=110, bbox_inches="tight")
+    plt.close(fig)
+    return path

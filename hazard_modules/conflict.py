@@ -19,7 +19,7 @@ class ConflictModule(HazardModule):
     hazards = [
         # 적군: 넓게, 비교적 천천히 번지고 천천히 줄어듦
         HazardSpec("enemy_forces", "적군", (200, 0, 0),
-                   spread_prob=0.30, neighborhood=8, decay_per_step=0.05),
+                   spread_prob=0.22, neighborhood=8, decay_per_step=0.06),
         # 포격: 빠르게 8방향으로 번지지만 금방 사그라듦
         HazardSpec("shelling", "포격", (255, 120, 0),
                    spread_prob=0.50, neighborhood=8, decay_per_step=0.30),
