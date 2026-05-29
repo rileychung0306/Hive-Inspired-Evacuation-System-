@@ -38,24 +38,30 @@ class ConflictModule(HazardModule):
     news_keywords = ["Bakhmut", "Ukraine", "shelling", "evacuation", "Donbas"]
 
     # Phase 3에서 GPT에게 줄 지시문(프롬프트). JSON으로만 답하도록 요구합니다.
-    llm_prompt = """당신은 분쟁 지역 위험 분석가입니다.
-아래 뉴스 기사를 읽고 위험 정보를 추출해, 반드시 아래 JSON 형식으로만 답하세요.
+    llm_prompt = """You are a conflict-zone hazard analyst focused on Bakhmut and the Donetsk region of Ukraine.
+Read the news article and extract hazard information. Respond with ONLY valid JSON in this exact schema:
 
 {
   "hazards": [
-    {"type": "shelling | enemy_forces | destroyed_building | enemy_drone | landmine",
-     "location_description": "구체적 위치 (예: Bakhmut 중심부)",
-     "severity": 1,
-     "time": "대략적 시각"}
+    {
+      "type": "shelling | enemy_forces | destroyed_building | enemy_drone | landmine",
+      "location_description": "specific location text (e.g. 'central Bakhmut', 'M-03 highway near Bakhmut')",
+      "lat": 48.59,
+      "lon": 38.00,
+      "severity": 7,
+      "time": "approximate time or date if known"
+    }
   ],
-  "road_closures": ["폐쇄된 도로 이름"],
-  "civilian_advisory": "시민에게 줄 권고사항 한 줄"
+  "road_closures": ["road names that are reportedly closed"],
+  "civilian_advisory": "one-line advisory for civilians"
 }
 
-규칙:
-- severity는 1~10 사이 정수입니다 (10이 가장 위험).
-- 기사에 위험 정보가 없으면 "hazards"를 빈 배열 [] 로 두세요.
-- JSON 외의 설명 문장은 절대 쓰지 마세요."""
+Rules:
+- severity: integer 1-10 (10 = most dangerous).
+- lat/lon: estimate the approximate coordinates of the location. If unknown, use Bakhmut center (48.59, 38.00).
+- ONLY include hazards in or near the Bakhmut / Donetsk Oblast area (roughly lat 48.0-49.0, lon 37.5-39.5).
+- If the article has no relevant hazard info, return "hazards": [].
+- Output JSON only — no extra prose, no markdown fences."""
 
 
 # 다른 파일에서 'from hazard_modules.conflict import conflict_module' 로 바로 쓰도록 준비

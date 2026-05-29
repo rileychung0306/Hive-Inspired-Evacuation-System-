@@ -8,7 +8,7 @@ streamlit
 streamlit-folium
 matplotlib
 requests
-openai
+anthropic
 python-dotenv
 reportlab
 qrcode[pil]

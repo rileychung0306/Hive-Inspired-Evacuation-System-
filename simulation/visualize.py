@@ -110,6 +110,161 @@ def run_pygame(city_grid, field_obj, swarm, bee, hazard_module,
     pygame.quit()
 
 
+def _recall_at(field_obj, bee, thresh=0.15):
+    """현재 시점의 재현율(recall) — 진짜 위험 중 군집이 확인한 비율."""
+    true_cells = field_obj.field.max(axis=2) > thresh
+    conf_cells = bee.confirmed_mask().any(axis=2)
+    nt = int(true_cells.sum())
+    if nt == 0:
+        return 0.0
+    tp = int((true_cells & conf_cells).sum())
+    return tp / nt
+
+
+def _draw_drones_on_panel(screen, drones, x_off, y_off, panel_cell_pixels):
+    """드론을 패널 내부 좌표(x_off, y_off)에 맞춰 그림."""
+    import pygame
+    px = panel_cell_pixels
+    for d in drones:
+        x = int(x_off + d.pos[1] * px)
+        y = int(y_off + d.pos[0] * px)
+        pygame.draw.circle(screen, (60, 130, 255), (x, y), max(2, int(d.vision * px)), 1)
+        pygame.draw.circle(screen, (10, 60, 230), (x, y), max(2, px), 0)
+
+
+def run_pygame_compare(city_grid, field_a, swarm_a, bee_a,
+                       field_b, swarm_b, bee_b, hazard_module,
+                       steps_per_frame=1, panel_cell_pixels=2, max_steps=None):
+    """3분할 라이브 비교 창:
+       ① 실제 위험 (정답)  |  ② 드론만  |  ③ 드론 + 뉴스
+
+    field_a/swarm_a/bee_a = 뉴스 OFF (Phase 2 비교용)
+    field_b/swarm_b/bee_b = 뉴스 ON  (Phase 3)
+    ESC 또는 창 닫기로 종료.
+    """
+    import pygame
+    pygame.init()
+    pygame.font.init()
+    px = panel_cell_pixels
+    panel_w = settings.GRID_SIZE * px
+    gap = 10
+    label_h = 30
+    stat_h = 24
+    win_w = 3 * panel_w + 2 * gap
+    win_h = panel_w + label_h + stat_h + 6
+    screen = pygame.display.set_mode((win_w, win_h))
+    pygame.display.set_caption("Hive Evac — 3분할 비교 (정답 vs 드론만 vs 드론+뉴스)")
+
+    font_lbl = pygame.font.SysFont("applegothic", 16, bold=True)
+    font_stat = pygame.font.SysFont("applegothic", 13)
+
+    clock = pygame.time.Clock()
+    running = True
+    while running:
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT:
+                running = False
+            elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
+                running = False
+
+        for _ in range(steps_per_frame):
+            field_a.step()
+            swarm_a.step(field_a.field, bee_a)
+            field_b.step()
+            swarm_b.step(field_b.field, bee_b)
+
+        screen.fill((245, 245, 245))
+
+        # 세 패널의 RGB 만들기
+        rgb_truth = compose_rgb(city_grid, field_b.field, hazard_module)
+        rgb_no    = compose_rgb(city_grid, bee_a.confirmed_field(), hazard_module)
+        rgb_with  = compose_rgb(city_grid, bee_b.confirmed_field(), hazard_module)
+
+        for i, rgb in enumerate([rgb_truth, rgb_no, rgb_with]):
+            surf = pygame.surfarray.make_surface(rgb.transpose(1, 0, 2))
+            surf = pygame.transform.scale(surf, (panel_w, panel_w))
+            screen.blit(surf, (i * (panel_w + gap), label_h))
+
+        # 드론 (패널 2, 3 위에만)
+        _draw_drones_on_panel(screen, swarm_a.drones, panel_w + gap, label_h, px)
+        _draw_drones_on_panel(screen, swarm_b.drones, 2 * (panel_w + gap), label_h, px)
+
+        # 패널 라벨
+        labels = ["① 실제 위험 (정답)", "② 드론만 (Phase 2)", "③ 드론 + 뉴스 (Phase 3)"]
+        for i, lbl in enumerate(labels):
+            text = font_lbl.render(lbl, True, (20, 20, 20))
+            screen.blit(text, (i * (panel_w + gap) + 8, 6))
+
+        # 라이브 수치: step + 재현율 비교
+        rec_no  = _recall_at(field_a, bee_a)
+        rec_yes = _recall_at(field_b, bee_b)
+        gap_pct = (rec_yes - rec_no) * 100
+        stat_y = label_h + panel_w + 4
+        screen.blit(font_stat.render(f"step {field_a.step_count}", True, (50, 50, 50)),
+                    (8, stat_y))
+        screen.blit(font_stat.render(f"재현율(recall) = {rec_no:.2f}", True, (50, 50, 50)),
+                    (panel_w + gap + 8, stat_y))
+        sign = "+" if gap_pct >= 0 else ""
+        screen.blit(font_stat.render(
+            f"재현율(recall) = {rec_yes:.2f}    ← 뉴스 융합 효과 {sign}{gap_pct:.1f}%p",
+            True, (200, 30, 30)),
+            (2 * (panel_w + gap) + 8, stat_y))
+
+        pygame.display.flip()
+        clock.tick(settings.FPS)
+
+        if max_steps and field_a.step_count >= max_steps:
+            running = False
+
+    pygame.quit()
+
+
+def save_snapshot_compare(city_grid, field_a, swarm_a, bee_a,
+                          field_b, swarm_b, bee_b, hazard_module,
+                          path, title=None):
+    """3분할 PNG: [실제 위험] | [드론만] | [드론+뉴스]. (Matplotlib, 발표용)"""
+    import matplotlib
+    matplotlib.use("Agg")
+    matplotlib.rcParams["font.family"] = "AppleGothic"
+    matplotlib.rcParams["axes.unicode_minus"] = False
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Patch, Circle
+
+    rgb_truth = compose_rgb(city_grid, field_b.field, hazard_module)
+    rgb_no    = compose_rgb(city_grid, bee_a.confirmed_field(), hazard_module)
+    rgb_with  = compose_rgb(city_grid, bee_b.confirmed_field(), hazard_module)
+
+    rec_no  = _recall_at(field_a, bee_a)
+    rec_yes = _recall_at(field_b, bee_b)
+
+    fig, axes = plt.subplots(1, 3, figsize=(18, 7))
+    axes[0].imshow(rgb_truth); axes[0].set_title("① 실제 위험 (정답)", fontsize=13)
+    axes[1].imshow(rgb_no);    axes[1].set_title(f"② 드론만 (Phase 2) — 재현율 {rec_no:.2f}", fontsize=13)
+    axes[2].imshow(rgb_with);  axes[2].set_title(f"③ 드론 + 뉴스 (Phase 3) — 재현율 {rec_yes:.2f}", fontsize=13)
+    for ax in axes:
+        ax.set_xticks([]); ax.set_yticks([])
+
+    for d in swarm_a.drones:
+        axes[1].add_patch(Circle((d.pos[1], d.pos[0]), d.vision,
+                                 fill=False, color="#3b82f6", lw=0.6, alpha=0.6))
+        axes[1].plot(d.pos[1], d.pos[0], "o", color="#1e3aff", ms=4)
+    for d in swarm_b.drones:
+        axes[2].add_patch(Circle((d.pos[1], d.pos[0]), d.vision,
+                                 fill=False, color="#3b82f6", lw=0.6, alpha=0.6))
+        axes[2].plot(d.pos[1], d.pos[0], "o", color="#1e3aff", ms=4)
+
+    handles = [Patch(facecolor=np.array(s.color) / 255, label=s.display_name)
+               for s in hazard_module.hazards]
+    axes[2].legend(handles=handles, loc="upper right", fontsize=8, framealpha=0.9)
+    if title:
+        fig.suptitle(title, fontsize=14)
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fig.savefig(path, dpi=110, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
 def save_snapshot_swarm(city_grid, true_field, bee, drones, hazard_module, path, title=None):
     """두 칸 비교 그림: (왼쪽) 실제 위험  vs  (오른쪽) 드론 군집이 확인한 위험 + 드론."""
     import matplotlib
