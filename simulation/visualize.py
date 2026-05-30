@@ -265,6 +265,108 @@ def save_snapshot_compare(city_grid, field_a, swarm_a, bee_a,
     return path
 
 
+def save_snapshot_routes(city_grid, risk_map, hazard_module, routes,
+                          start_latlon, bbox, path, title=None):
+    """가족 구성별 안전 경로 비교 그림 (Phase 4 발표용).
+
+    경로 + 도시 + 위험을 보여줌. 4개 이상이면 2x2 격자, 그 외는 1행.
+    경로가 잘 보이도록 도시 영역으로 확대(zoom)합니다.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    matplotlib.rcParams["font.family"] = "AppleGothic"
+    matplotlib.rcParams["axes.unicode_minus"] = False
+    import matplotlib.pyplot as plt
+    from routing.graph_builder import latlon_to_cell
+
+    N = settings.GRID_SIZE
+    # 도시 + 위험 합성 (위험은 빨강으로)
+    rgb_bg = np.zeros((N, N, 3), dtype=np.float32)
+    for cell_type, color in settings.CELL_COLORS.items():
+        rgb_bg[city_grid == cell_type] = color
+    a = np.clip(risk_map, 0, 1)[:, :, None]
+    rgb_bg = rgb_bg * (1 - a * 0.8) + np.array([220, 50, 30], dtype=np.float32) * (a * 0.8)
+    rgb_bg = np.clip(rgb_bg, 0, 255).astype(np.uint8)
+
+    sr, sc = latlon_to_cell(start_latlon[0], start_latlon[1], bbox)
+
+    # Zoom 영역: 출발점 + (도달 가능한) 대피소를 포함하도록, 여유 10칸
+    rs = [sr]
+    cs = [sc]
+    for r in routes:
+        if r.get("shelter") and r["shelter"].get("lat") is not None:
+            shr, shc = latlon_to_cell(r["shelter"]["lat"], r["shelter"]["lon"], bbox)
+            rs.append(shr); cs.append(shc)
+        for lat, lon in r.get("path_coords", []) or []:
+            rr, cc = latlon_to_cell(lat, lon, bbox)
+            rs.append(rr); cs.append(cc)
+    pad = 8
+    r_min, r_max = max(0, min(rs) - pad), min(N - 1, max(rs) + pad)
+    c_min, c_max = max(0, min(cs) - pad), min(N - 1, max(cs) + pad)
+
+    n = len(routes)
+    if n >= 3:
+        nrows, ncols = 2, (n + 1) // 2
+        figsize = (7 * ncols, 7 * nrows)
+    else:
+        nrows, ncols = 1, n
+        figsize = (8 * n, 7)
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize)
+    axes = np.array(axes).reshape(-1)
+
+    for ax, route in zip(axes, routes):
+        ax.imshow(rgb_bg)
+        ax.set_xlim(c_min, c_max)
+        ax.set_ylim(r_max, r_min)  # imshow 의 y축이 위->아래라서 반전
+        ax.set_xticks([]); ax.set_yticks([])
+
+        # 도달 불가 케이스
+        if not route.get("path_coords") or route.get("shelter") is None:
+            ax.set_title(
+                f"{route['profile_label']}\n"
+                f"[경고] 도달 가능한 대피소 없음 "
+                f"(체력 한계 {route.get('max_distance_m', 0)}m 초과)\n"
+                f"시스템 권고: 차량 지원 / 이웃 도움 필요",
+                fontsize=11, color="#b91c1c")
+            ax.plot(sc, sr, "o", ms=15, color="#22c55e",
+                    markeredgecolor="white", mew=2, label="출발 (대피 불가)", zorder=5)
+            ax.legend(loc="lower right", fontsize=10, framealpha=0.92)
+            continue
+
+        time_str = (f"{route['travel_time_min']:.1f}분"
+                    if "travel_time_min" in route else "")
+        ax.set_title(
+            f"{route['profile_label']}\n"
+            f"→ {route['shelter']['name']}, "
+            f"{route['total_meters']:.0f}m"
+            + (f" / {time_str}" if time_str else "")
+            + f", 평균 위험 {route['avg_risk']:.2f}",
+            fontsize=12)
+
+        coords_rc = [latlon_to_cell(lat, lon, bbox) for lat, lon in route["path_coords"]]
+        rows = [rc[0] for rc in coords_rc]
+        cols = [rc[1] for rc in coords_rc]
+        ax.plot(cols, rows, "-", lw=4.0, color="#00aaff", alpha=0.95, label="경로")
+        ax.plot(sc, sr, "o", ms=15, color="#22c55e",
+                markeredgecolor="white", mew=2, label="출발", zorder=5)
+        sh_r, sh_c = latlon_to_cell(route["shelter"]["lat"],
+                                     route["shelter"]["lon"], bbox)
+        ax.plot(sh_c, sh_r, "s", ms=16, color="#10b981",
+                markeredgecolor="black", mew=2, label=f"대피소: {route['shelter']['name']}", zorder=5)
+        ax.legend(loc="lower right", fontsize=10, framealpha=0.92)
+
+    # 사용 안 한 panel 끄기
+    for ax in axes[len(routes):]:
+        ax.axis("off")
+
+    if title:
+        fig.suptitle(title, fontsize=14)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fig.savefig(path, dpi=110, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
 def save_snapshot_swarm(city_grid, true_field, bee, drones, hazard_module, path, title=None):
     """두 칸 비교 그림: (왼쪽) 실제 위험  vs  (오른쪽) 드론 군집이 확인한 위험 + 드론."""
     import matplotlib

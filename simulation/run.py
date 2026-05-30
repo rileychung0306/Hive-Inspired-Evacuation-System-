@@ -9,6 +9,7 @@
   실시간 창(3분할 비교):       python -m simulation.run --compare
   PNG 스냅샷 저장(검증):       python -m simulation.run --snapshots
   3분할 비교 PNG:             python -m simulation.run --compare --snapshots
+  가족 구성별 안전 경로 비교:    python -m simulation.run --route          (Phase 4)
   뉴스 캐시 강제 갱신:         python -m simulation.run --refresh-news
   뉴스 융합 끄기(비교용):       python -m simulation.run --no-news
 """
@@ -61,6 +62,68 @@ def main():
     refresh_news = "--refresh-news" in args
     snapshots = "--snapshots" in args
     compare = "--compare" in args
+    route_demo = "--route" in args
+
+    if route_demo:
+        print("\n=== Phase 4: 위험 가중 A* 라우팅 데모 ===\n")
+        city, _, field, swarm, bee, bbox = build_world(
+            hazard, use_news=True, refresh_news=refresh_news, seed=42)
+
+        # 시뮬레이션을 150 스텝 진행해서 위험 지도가 충분히 발달하게 함
+        print("시뮬레이션 150 스텝 진행 중 (위험 지도 발달)...")
+        for _ in range(150):
+            field.step(); swarm.step(field.field, bee)
+
+        from routing.graph_builder import (load_or_build_bakhmut_graph,
+                                            shelters_to_osm_nodes, latlon_to_cell)
+        from routing.risk_astar import route_for_civilian, USER_PROFILES
+        G = load_or_build_bakhmut_graph()
+        shelter_info = shelters_to_osm_nodes(G)
+        print(f"대피소 {len(shelter_info)}개 OSM 매핑 완료")
+
+        # 도로망 위 위험 분포 진단
+        import numpy as _np
+        rmap = bee.confirmed_risk()
+        node_risks = []
+        for n, data in G.nodes(data=True):
+            r, c = latlon_to_cell(data["y"], data["x"], bbox)
+            node_risks.append(float(rmap[r, c]))
+        node_risks = _np.array(node_risks)
+        print(f"[진단] 도로망 노드 {len(node_risks)}개 중 위험 있음: "
+              f"{int((node_risks > 0.1).sum())}개, "
+              f"평균 {node_risks.mean():.3f}, 최대 {node_risks.max():.3f}\n")
+
+        # 가상 시민 출발점: Bakhmut 도시 북서부.
+        # 의도적으로 모든 대피소가 2.5km 밖이라 노약자는 도달 불가 -> 시스템이 자동 감지
+        # 어린이는 가장 가까운 곳 1개 도달 가능, 성인/차량은 여러 선택지.
+        civilian_start = (48.612, 37.957)
+
+        # 시민 분류 4종 비교 (이동 능력 기반: UNHCR/적십자 분류)
+        routes_to_render = []
+        for profile_key in ["healthy_adult", "with_kids", "elderly_or_disabled", "by_vehicle"]:
+            r = route_for_civilian(G, civilian_start, shelter_info,
+                                    bee.confirmed_risk(), bbox,
+                                    profile_key=profile_key)
+            routes_to_render.append(r)  # 도달 불가도 시각화에 포함 (메시지로 표시)
+            if r.get("shelter") is None or not r.get("path_coords"):
+                excluded = [c["name"] for c in r.get("candidates_summary", []) if not c.get("ok")]
+                print(f"  {r['profile_label']:25s} -> 도달 가능한 대피소 없음 "
+                      f"(전부 {USER_PROFILES[profile_key]['max_distance_m']}m 밖)")
+            else:
+                print(f"  {r['profile_label']:25s} -> {r['shelter']['name']:10s}  "
+                      f"{r['total_meters']:6.0f}m, "
+                      f"{r['travel_time_min']:5.1f}분, "
+                      f"평균위험 {r['avg_risk']:.3f}  "
+                      f"(α={r['alpha']:.0f}, 속도 {r['speed_mps']} m/s, "
+                      f"한계 {r['max_distance_m']}m)")
+
+        if routes_to_render:
+            out = "frames/phase4_routes.png"
+            visualize.save_snapshot_routes(
+                city, bee.confirmed_risk(), hazard, routes_to_render, civilian_start, bbox, out,
+                title=f"Phase 4 — 시민 분류별 안전 경로 (출발: Bakhmut 북서, step {field.step_count})")
+            print(f"\n저장됨: {out}")
+        return
 
     if compare:
         # 두 세계를 같은 시드로 만들어 같은 도시/같은 위험 위에서 비교
