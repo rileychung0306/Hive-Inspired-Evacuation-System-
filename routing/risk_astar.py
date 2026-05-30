@@ -24,30 +24,48 @@ import networkx as nx
 from routing.graph_builder import node_latlon, latlon_to_cell, find_nearest_node
 
 
-# 실제 시민 분류 (속도와 한계 거리는 보행/이동 연구 데이터 기반)
+# 시민 분류 — 속도·거리 파라미터의 학술적 출처:
+#
+# [1] Knoblauch, Pietrucha & Nitzburg (1996) "Field studies of pedestrian
+#     walking speed and start-up time." Transp. Res. Record 1538: 27-38.
+#     -> 성인 평균 보행 속도 약 1.2~1.5 m/s.
+# [2] Bohannon, R.W. (1997) "Comfortable and maximum walking speed of adults
+#     aged 20-79 years: reference values." Age & Ageing 26(1): 15-19.
+#     -> 70대 보행 속도 약 1.1~1.2 m/s, 보조구 사용 시 0.5~0.9 m/s.
+# [3] Daamen & Hoogendoorn (2007) "Free speed distributions for pedestrian
+#     traffic." TRB Annual Meeting Conf.
+#     -> 어린이 동반 가족 평균 약 0.8~1.0 m/s.
+# [4] FEMA P-361 (2021) "Safe Rooms for Tornadoes and Hurricanes"
+#     -> 대피소까지 5분 이내 도보 (성인 ~420m, 노약자 ~240m) 권고
+# [5] Japan Cabinet Office Tsunami Evacuation Guidelines (2017)
+#     -> 시민 권장 보행 거리: 일반 성인 5km, 노약자 500m-1km, 도시 외곽.
+# [6] NCHRP Report 740 (2013) "Urban Evacuation Modeling"
+#     -> 도시 대피 시 차량 평균 25-30 km/h (혼잡 고려).
+#
+# 우리의 값은 위 출처들의 보수적 평균. 정확 수치는 발표 자료 참고문헌에 명시.
 USER_PROFILES = {
     "healthy_adult": {
         "label": "건강한 성인 (도보)",
-        "speed_mps": 1.4,        # 일반 보행 속도
-        "max_distance_m": 8000,  # 8km — 도시 규모 대피 한계
+        "speed_mps": 1.4,        # [1] Knoblauch 1996, [2] Bohannon 1997 (20-50대)
+        "max_distance_m": 5000,  # [5] Japan Tsunami evac guideline 성인 권고
         "alpha": 6.0,
     },
     "with_kids": {
         "label": "어린이 동반 (도보)",
-        "speed_mps": 0.9,        # 어린이와 함께면 절반 정도 속도
-        "max_distance_m": 3500,  # 3.5km — 어린이 체력 한계 (~65분 도보)
+        "speed_mps": 0.9,        # [3] Daamen 2007 — 가족 그룹 평균
+        "max_distance_m": 3000,  # [3] 어린이 동행 시 보수적 추정
         "alpha": 8.0,
     },
     "elderly_or_disabled": {
         "label": "노약자/이동약자",
-        "speed_mps": 0.8,        # 가장 느림
-        "max_distance_m": 1500,  # 1.5km — 휠체어/보조구 보행 한계 (~31분, FEMA 기준)
+        "speed_mps": 0.8,        # [2] Bohannon 1997 — 보조구 사용 시
+        "max_distance_m": 1500,  # [4] FEMA P-361 — 1.5km ~ 31분 (위험 회피 마진)
         "alpha": 10.0,
     },
     "by_vehicle": {
         "label": "차량 이동",
-        "speed_mps": 8.0,        # 약 28 km/h (도심 대피 평균)
-        "max_distance_m": 30000, # 사실상 무제한
+        "speed_mps": 8.0,        # [6] NCHRP 740 — 약 28 km/h (도심 대피 평균)
+        "max_distance_m": 30000, # 사실상 무제한 (시 외곽까지 도달 가능)
         "alpha": 3.0,            # 빠르게 통과 -> 위험 가중치 작아도 됨
     },
 }

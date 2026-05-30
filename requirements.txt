@@ -6,6 +6,7 @@ osmnx
 folium
 streamlit
 streamlit-folium
+streamlit-autorefresh
 matplotlib
 requests
 anthropic

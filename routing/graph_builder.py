@@ -139,8 +139,111 @@ def find_nearest_node(G, lat: float, lon: float):
     return best
 
 
-def shelters_to_osm_nodes(G):
-    """SHELTERS_LATLON 각 대피소 -> 가장 가까운 OSM 노드 ID 로 매핑."""
+AMENITY_CACHE = Path("data/bakhmut_amenities.pkl")
+
+
+def fetch_osm_amenities(bbox=BAKHMUT_BBOX):
+    """Bakhmut 시내의 학교/병원/지역센터/진료소 등 '대피 가능 시설'을 OSM에서 가져옴.
+    한 번 받으면 디스크 캐시(data/bakhmut_amenities.pkl) 사용. 실패 시 None.
+    """
+    if AMENITY_CACHE.exists():
+        try:
+            with open(AMENITY_CACHE, "rb") as f:
+                return pickle.load(f)
+        except Exception:
+            pass
+    try:
+        import osmnx as ox
+        print("[Amenity] Bakhmut 학교/병원 등 OSM 조회 중...")
+        gdf = ox.features_from_bbox(bbox=bbox, tags={
+            "amenity": ["school", "hospital", "community_centre", "clinic"]
+        })
+        result = []
+        for _, row in gdf.iterrows():
+            geom = row.get("geometry")
+            if geom is None:
+                continue
+            if geom.geom_type == "Point":
+                lat, lon = float(geom.y), float(geom.x)
+            else:
+                c = geom.centroid
+                lat, lon = float(c.y), float(c.x)
+            result.append({
+                "name": str(row.get("name", "(이름없음)")),
+                "amenity": str(row.get("amenity", "?")),
+                "lat": lat, "lon": lon,
+            })
+        AMENITY_CACHE.parent.mkdir(exist_ok=True)
+        with open(AMENITY_CACHE, "wb") as f:
+            pickle.dump(result, f)
+        print(f"[Amenity] {len(result)}곳 캐시 저장 -> {AMENITY_CACHE}")
+        return result
+    except Exception as e:
+        print(f"[Amenity] OSM 조회 실패 ({type(e).__name__}): hardcoded 대피소 사용")
+        return None
+
+
+def pick_spread_shelters(amenities, n: int = 5, bbox=BAKHMUT_BBOX):
+    """amenities 중 5곳을 지리적으로 분산되게 고른다 (북·남·동·서·중앙)."""
+    if not amenities or len(amenities) < n:
+        return None
+    bb_w, bb_s, bb_e, bb_n = bbox
+    cx, cy = (bb_w + bb_e) / 2, (bb_s + bb_n) / 2
+    targets = [
+        ("북부", (cx, bb_n - 0.005)),
+        ("남부", (cx, bb_s + 0.005)),
+        ("동부", (bb_e - 0.005, cy)),
+        ("서부", (bb_w + 0.005, cy)),
+        ("중앙", (cx, cy)),
+    ][:n]
+    used = set()
+    out = []
+    for kor, (tlon, tlat) in targets:
+        best = None
+        best_d = float("inf")
+        for i, a in enumerate(amenities):
+            if i in used:
+                continue
+            d = (a["lat"] - tlat) ** 2 + (a["lon"] - tlon) ** 2
+            if d < best_d:
+                best_d, best = d, i
+        if best is None:
+            continue
+        a = amenities[best]
+        used.add(best)
+        raw = a.get("name", "")
+        if raw and raw not in ("(이름없음)", "nan", "None") and not raw.startswith("nan"):
+            display = f"{kor} - {raw[:18]}"
+        else:
+            amenity_kr = {"hospital": "병원", "school": "학교",
+                          "clinic": "진료소", "community_centre": "주민센터"}.get(
+                a.get("amenity", ""), "시설")
+            display = f"{kor} - {amenity_kr}"
+        out.append({"name": display, "lat": a["lat"], "lon": a["lon"],
+                    "amenity": a["amenity"], "raw_name": raw})
+    return out if len(out) == n else None
+
+
+def shelters_to_osm_nodes(G, use_real: bool = True):
+    """대피소 위치 -> 그래프 노드 ID.
+
+    use_real=True 면 실제 OSM 학교/병원에서 5곳 자동 선정 (지리적 분산).
+    실패 시 SHELTERS_LATLON (하드코드) 으로 폴백.
+    """
+    if use_real:
+        amenities = fetch_osm_amenities()
+        picked = pick_spread_shelters(amenities) if amenities else None
+        if picked:
+            print(f"[Shelter] 실제 OSM 시설 {len(picked)}곳 사용:")
+            out = []
+            for sh in picked:
+                node = find_nearest_node(G, sh["lat"], sh["lon"])
+                out.append({"name": sh["name"], "lat": sh["lat"],
+                            "lon": sh["lon"], "node": node})
+                print(f"          - {sh['name']}")
+            return out
+
+    print("[Shelter] hardcoded SHELTERS_LATLON 사용 (폴백)")
     out = []
     for name, (lat, lon) in SHELTERS_LATLON:
         node = find_nearest_node(G, lat, lon)
